@@ -3,6 +3,8 @@ import mysql.connector
 import toml
 import pandas as pd
 
+st.set_page_config(layout='wide', page_icon=':open_book:', page_title='Document')
+
 st.title(':open_book:')
 
 # Get the argument passed via URL
