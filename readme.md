@@ -12,6 +12,20 @@ Obs: requirements.txt file has the packages for streamlit deploy.
 
 ## Getting Started
 
+Create a file `secrets.toml` with the following content (replacing the values):
+
+```
+[connections.mysql]
+dialect = <your_dialect>
+host = <your_host>
+port = <your_port>
+database = <your_database>
+username = <your_username>
+password = <your_password>
+```
+
+Create a poython environment following the instructions of file `spec-file.txt`.
+
 To activate environment:
 $ conda activate .env_app
 
