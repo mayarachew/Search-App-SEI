@@ -1,43 +1,93 @@
 import pandas as pd
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, MetaData, Table, Column, Integer, inspect, Text
+import toml
 
-credentials = {
-  'host':"127.0.0.1",
-  'user':"root",
-  'password':"451278",
-  'database':"sei"
+
+# Load database config
+with open('../.streamlit/secrets.toml', 'r') as f:
+    config = toml.load(f)
+
+config = {
+    'user': config['connections']['mysql']['username'],
+    'password': config['connections']['mysql']['password'],
+    'host': config['connections']['mysql']['host'],
+    'database': config['connections']['mysql']['database'],
+    'port': config['connections']['mysql']['port']
 }
 
-engine = create_engine(f"mysql+mysqlconnector://{credentials['user']}:{credentials['password']}@{credentials['host']}/{credentials['database']}")
+# Create engine
+engine = create_engine(
+    f"mysql+mysqlconnector://{config['user']}:{config['password']}@{config['host']}:{config['port']}/{config['database']}?charset=utf8mb4"
+)
 
-acts_df = pd.read_csv('data/acts.csv', sep='\t')
-announcements_df = pd.read_csv('data/announcements.csv', sep='\t')
+# Read CSVs
+acts = pd.read_csv('data/acts_pred.csv', sep=',')
+leaves = pd.read_csv('data/leaves_pred.csv', sep=',')
+resolutions = pd.read_csv('data/resolutions_pred.csv', sep=',')
+std_announcements = pd.read_csv('data/std_announcements_pred.csv', sep=',')
 
-acts_df.to_sql('acts', con=engine, if_exists='fail', index=False)
-announcements_df.to_sql('announcements', con=engine, if_exists='fail', index=False)
+# Define table schemas with primary keys
+# metadata = MetaData()
 
+# Table('act', metadata,
+#       Column('id', Integer, primary_key=True, autoincrement=True),
+#       Column('sentence', Text),
+#       Column('predicted_label', Text))
 
-'''
-To allow LOAD DATA LOCAL INFILE, you have to:
+# Table('leave', metadata,
+#       Column('id', Integer, primary_key=True, autoincrement=True),
+#       Column('sentence', Text),
+#       Column('predicted_label', Text))
 
-1) Edit the file /etc/mysql/mysql.conf.d/mysqld.cnf and add the following:
-[mysqld]
-secure-file-priv = ""
+# Table('resolution', metadata,
+#       Column('id', Integer, primary_key=True, autoincrement=True),
+#       Column('sentence', Text),
+#       Column('predicted_label', Text))
 
-2) Restart the service
-systemctl restart mysql 
+# Table('std_announcement', metadata,
+#       Column('id', Integer, primary_key=True, autoincrement=True),
+#       Column('sentence', Text),
+#       Column('predicted_label', Text))
 
-3) run: $ sudo mysql -h localhost -u root sei -p
-and run in mysql> $ set global local_infile=true;
-'''
+# Create all tables (with PKs)
+# metadata.create_all(engine)
 
-'''
-To grand extern access to root without needing sudo, you need to:
+# Insert data
+acts.to_sql('p_acts', con=engine, if_exists='replace', index=False)
+leaves.to_sql('p_leaves', con=engine, if_exists='replace', index=False)
+resolutions.to_sql('p_resolutions', con=engine, if_exists='replace', index=False)
+std_announcements.to_sql('p_std_announcements', con=engine, if_exists='replace', index=False)
 
-1) Edit the file /etc/mysql/mysql.conf.d/mysqld.cnf and add the following:
-[mysqld]
-mysql_native_password=ON
+print("All tables created and data inserted.")
 
-2) Run in mysql terminal:
-mysql> ALTER USER 'root'@'127.0.0.1' IDENTIFIED WITH mysql_native_password BY '<your_password>';
-'''
+inspector = inspect(engine)
+table_names = inspector.get_table_names()
+
+print("Tables in the database:")
+print(table_names)
+
+# 
+# '''
+# To allow LOAD DATA LOCAL INFILE, you have to:
+
+# 1) Edit the file /etc/mysql/mysql.conf.d/mysqld.cnf and add the following:
+# [mysqld]
+# secure-file-priv = ""
+
+# 2) Restart the service
+# systemctl restart mysql 
+
+# 3) run: $ sudo mysql -h localhost -u root sei -p
+# and run in mysql> $ set global local_infile=true;
+# '''
+
+# '''
+# To grand extern access to root without needing sudo, you need to:
+
+# 1) Edit the file /etc/mysql/mysql.conf.d/mysqld.cnf and add the following:
+# [mysqld]
+# mysql_native_password=ON
+
+# 2) Run in mysql terminal:
+# mysql> ALTER USER 'root'@'127.0.0.1' IDENTIFIED WITH mysql_native_password BY '<your_password>';
+# '''
