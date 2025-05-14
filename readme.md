@@ -31,3 +31,5 @@ $ conda activate .env_app
 
 To run Search App:
 $ streamlit run main_page.py
+
+The `requirements.txt` is required for Streamlit deploy.
