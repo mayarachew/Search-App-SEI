@@ -1,7 +1,11 @@
 import streamlit as st
-import mysql.connector
+from sqlalchemy import create_engine
 import toml
 import pandas as pd
+import ast
+import hashlib
+import random
+import re
 
 # Set Streamlit page config
 st.set_page_config(layout='wide', page_icon=':open_book:', page_title='Document')
@@ -29,94 +33,179 @@ config = {
   'database': config['connections']['mysql']['database'],
   'port': config['connections']['mysql']['port']
 }
-cnx = mysql.connector.connect(**config)
-cursor = cnx.cursor()
+
+# Create engine
+engine = create_engine(
+    f"mysql+mysqlconnector://{config['user']}:{config['password']}@{config['host']}:{config['port']}/{config['database']}?charset=utf8mb4"
+)
 
 # Fetch raw text from the database
-raw_text = pd.read_sql(f'SELECT raw_text from {doctype} WHERE document_id = {docid};', cnx).iloc[0, 0]
+sentence = pd.read_sql(f'SELECT sentence from {doctype} WHERE id = {docid};', engine).iloc[0, 0]
+labels = pd.read_sql(f'SELECT predicted_label from {doctype} WHERE id = {docid};', engine).iloc[0, 0]
 
-# Sample text for highlighting
-text = 'Boletim de Atos Oficiais da XXXXXXXXX em 23/10/2024 ATO DA SECRETARIA DE TECNOLOGIA DA\
-        INFORMAÇÃO Nº 8X/202X Designa servidores para atuarem como gestores e fiscais do Contrato\
-        n° 5XX/202X, que fazem entre si a união, por intermédio da XXXXXXXX e do TSE. \
-        XXXXXXX, 08, de novembro, de 2024, Documento assinado eletronicamente por \
-        XXXXX XXXXX XXXXX XXXX XXXX, Decano(a) de Pesquisa e Inovação, em 08/01/2024, \
-        às 11:59, conforme XXXXX, com fundamento na Instrução da Reitoria \
-        0003/201X da XXXXX XXXXX XXXXX. A autenticidade deste documento pode ser conferida \
-        no site http://XXXXX/sei/controlador_externo.php?acao=documento_conferir&id_orgao_acesso_externo=0, \
-        informando o código verificador XXXXXXX e o código CRC C46CXXX. Referência: Processo nº \
-        23XXX.052XXX/202X-XX SEI nº XXXXXXX.'
+sentence = ast.literal_eval(sentence)
+labels = ast.literal_eval(labels)
 
-# Tokenize text
-text = text.replace('.',' .').replace(',',' ,').replace('!',' !').replace('?',' ?').replace(':',' :').replace(';',' ;')
-tokens = text.split()
+# Form
+entities_dict = {
+    'p_acts':[
+        "SEI\'s Process Number", 
+        "Organization", 
+        "Person's Name", 
+        "Location", 
+        "Date", 
+        "Begin Date", 
+        "End Date", 
+        "Document Number", 
+        "Enrollment number", 
+        "Subject", 
+        "University related", 
+        "Object", 
+        "Position", 
+        "Regulation or Article number", 
+        "DOU information"],
+    'p_resolutions':[
+        "SEI's Process Number",
+        "Organization",
+        "Person\'s Name",
+        "Document Number",
+        "Subject",
+        "University related",
+        "Date",
+        "Meeting Number",
+        "Object",
+        "Position",
+        "Regulation or Article number"],
+    'p_leaves': [
+        "SEI's Process Number",
+        "Location",
+        "Organization",
+        "Person's Name",
+        "Document Number",
+        "Begin Date",
+        "End Date",
+        "Enrollment number",
+        "Subject",
+        "University related",
+        "Cost",
+        "Position",
+        "DOU information",
+        "Justification"],
+    'p_std_announcements': [
+        "SEI's Process Number",
+        "Organization",
+        "Person's Name",
+        "Position",
+        "Date",
+        "Address of Announcement",
+        "Type",
+        "Document Number",
+        "Wrong Information",
+        "Correct Information",
+        "Subject",
+        "University related",
+        "Object",
+        "Regulation or Article number"
+    ]
+}
 
-# Example tags (in reality, these would come from your NER process)
-# tags = '0 0 1 1 0 2 0 3 0 0 4 4 4 4 4 0 5 0 0 0 0 0 0 0 0 0 0 0 5 0 0 0 0 0 0 0 0 0 0 0 2 0 0 2 0'
-tags = '0 0 1 1 0 2 0 3 0 0 4 4 4 4 4 0 5 0 0 0 0 0 0 0 0 0 0 0 5 0 0 0 0 0 0 0 0 0 0 0 2 0 0 2 0 6 0 3 3 3 3 3 3 3 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0'
+entity_bio_dict = {
+    'Location': 'LOC',
+    'SEI\'s Process Number': 'SEI',
+    'Motive': 'MOT',
+    'DOU information': 'DOU',
+    'Enrollment number': 'MAT',
+    'Subject': 'SUB',
+    'Begin Date': 'BDT',
+    'Regulation or Article number': 'ART',
+    'End Date': 'EDT',
+    'Cost': 'ONU',
+    'Person\'s Name': 'PER',
+    'Organization': 'ORG',
+    'University related': 'UNI',
+    'Position': 'POS',
+    'Date': 'DAT',
+    'Object': 'OBJ',
+    'Document Number': 'NUM',
+    'Correct Information': 'COR',
+    'Address of Announcement': 'URL',
+    'Wrong Information': 'WRG',
+    'Type': 'TYP',
+    'Meeting Number': 'MET',
+}
 
-tag_list = tags.split(' ')
+bio_to_label = {v: k for k, v in entity_bio_dict.items()}
 
-if len(tokens) != len(tag_list):
-    st.write(len(tokens))
-    st.write(len(tag_list))
+
+if len(sentence) != len(labels):
+    st.write(len(sentence))
+    st.write(len(labels))
     raise ValueError("The number of tokens and tags must be the same.")
 
-# Tag mappings
-tags_dict = {
-    '1': 'DOC',
-    '2': 'ORG',
-    '3': 'DAT',
-    '4': 'UNI',
-    '5': 'PROC',
-    '6': 'LOC'
-}
+def generate_light_hex_color(label):
+    """Generate a consistent light hex color based on a string label."""
+    # Hash the label and use it to seed color values
+    hash_digest = hashlib.md5(label.encode()).hexdigest()
+    
+    # Use chunks of the hash to generate RGB values in a light range (160–220)
+    r = 160 + int(hash_digest[0:2], 16) % 61
+    g = 160 + int(hash_digest[2:4], 16) % 61
+    b = 160 + int(hash_digest[4:6], 16) % 61
 
-# Colors mapping
-colors_dict = {
-    '1': '#C0C0FF',  # Pastel Light Blue
-    '2': '#FFCCCC',  # Pastel Light Red
-    '3': '#CCFFCC',  # Pastel Light Green
-    '4': '#FFCCE5',  # Pastel Light Pink
-    '5': '#CCFFEB',  # Pastel Mint Green
-    '6': '#FFEB3B',  # Yellow
-}
+    return f'#{r:02x}{g:02x}{b:02x}'
 
-# Function to generate styled legends
-def show_legends(colors_dict):
+# Collect all unique entities
+all_entities = set()
+for entity_list in entities_dict.values():
+    all_entities.update(entity_list)
+
+# Assign a light hex color to each unique entity
+entity_color_map = {entity: generate_light_hex_color(entity) for entity in sorted(all_entities)}
+
+
+def show_legends(entity_color_map):
     legend = ''
-    for i, (tag, color) in enumerate(colors_dict.items()):
-        label = tags_dict.get(tag, "Unknown")
-        legend += (f'<span style="display: inline-flex; align-items: center; margin-right: 20px;">'
-                f'<span style="width: 20px; height: 20px; background-color:{color}; '
-                f'display: inline-block; margin-right: 10px;"></span>'
-                f'<strong>{label}</strong></span>')
+    for entity_label, color in entity_color_map.items():
+        label = entity_label
+        legend += (
+            f'<span style="display: inline-flex; align-items: center; margin-right: 20px;">'
+            f'<span style="width: 20px; height: 20px; background-color:{color}; '
+            f'display: inline-block; margin-right: 10px; border-radius: 3px; border: 1px solid #ccc;"></span>'
+            f'<strong>{label}</strong></span>'
+        )
     return legend
 
 
-# Function to highlight entities in the text
+
 def highlight_entities(text, tag_list):
     """
-    Highlight entities by wrapping them in <span> tags with background color.
+    Highlight entities using consistent colors from entity_color_map.
     """
     highlighted_text = ""
-    
-    for token, tag in zip(text.split(), tag_list):  
-        if tag in colors_dict:  # Ensure the token has a valid tag
-            background_color = colors_dict[tag]
-            hover = tags_dict.get(tag, 'UNKNOWN')  # Default to 'UNKNOWN' if tag is not found in tags_dict
-            highlighted_text += f'<span style="background-color:{background_color}; padding: 2px 5px; border-radius: 4px;" class="highlighted" title="{hover}">{token}</span>'
+
+    for token, label in zip(text, labels):
+        match = re.match(r'^[BI]-(.+)', label)  # Match B-ORG, I-DAT, etc.
+        if match:
+            entity_code = match.group(1)  # e.g., "ORG"
+            bio_label = bio_to_label.get(entity_code, entity_code)  # e.g., "Organization"
+            color = entity_color_map.get(bio_label, "#cccccc")
+            highlighted_text += (
+                f'<span style="background-color:{color}; padding: 1px 8px; '
+                f'border-radius: 4px; margin: -3px;" title="{bio_label}">'
+                f'{token}</span> '
+            )
         else:
-            highlighted_text += f'{token} '  # If tag is not valid, just add the token
-    
-    return highlighted_text
+            highlighted_text += f'{token} '
+
+    return highlighted_text.strip()
+
 
 
 # Show either highlighted or plain text based on checkbox state
 if show_highlighted:
     # Display the highlighted text
-    st.markdown(show_legends(colors_dict), unsafe_allow_html=True)
-    st.markdown(highlight_entities(text, tag_list), unsafe_allow_html=True)
+    st.markdown(show_legends(entity_color_map), unsafe_allow_html=True)
+    st.markdown(highlight_entities(sentence, labels), unsafe_allow_html=True)
 else:
     # Display the raw, unhighlighted text
-    st.write(text)
+    st.write(' '.join(sentence))
