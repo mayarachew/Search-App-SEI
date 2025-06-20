@@ -27,7 +27,7 @@ password = <your_password>
 Create a poython environment following the instructions of file `spec-file.txt`.
 
 To activate environment:
-$ conda activate .env_app
+$ conda activate <env>
 
 To run Search App:
 $ streamlit run main_page.py
